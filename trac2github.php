@@ -37,6 +37,16 @@ class Converter
 		$parser = \Console_CommandLine::fromXmlFile(__DIR__ . '/cli.xml');
 		$result = $parser->parse();
 		$config = $this->parseConfig($result->options['config']);
+		try {
+			$db = new \PDO($config['database']['dsn']);
+		} catch (\PDOException $e) {
+			$this->terminate(
+				sprintf(
+					'Unable to connect to database "%s"' . PHP_EOL,
+					$config['database']['dsn']
+				)
+			);
+		}
 	}
 
 	protected function terminate($message)
@@ -68,10 +78,22 @@ class Converter
 			);
 		}
 
-		return array_merge_recursive(
-			self::$default_config,
-			$config
-		);
+		$merge = function(array &$array1, array &$array2) use (&$merge)
+		{
+			$merged = $array1;
+
+			foreach ($array2 as $key => &$value) {
+				if (is_array($value) && isset($merged[$key]) && is_array($merged[$key])) {
+					$merged[$key] = $merge($merged[$key], $value);
+				} else {
+					$merged[$key] = $value;
+				}
+			}
+
+			return $merged;
+		};
+
+		return $merge(self::$default_config, $config);
 	}
 }
 
