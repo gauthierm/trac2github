@@ -1,12 +1,85 @@
+#!/usr/bin/env php
 <?php
+
+namespace silverorange\Trac2Github;
+
+require_once 'Console/CommandLine.php';
+
 /**
- * @package trac2github
- * @version 1.1
- * @author Vladimir Sibirov
- * @author Lukas Eder
- * @copyright (c) Vladimir Sibirov 2011
- * @license BSD
+ * @package   trac2github
+ * @version   2.0
+ * @author    Vladimir Sibirov
+ * @author    Michael Gauthier <mike@silverorange.com>
+ * @author    Lukas Eder
+ * @copyright 2011 Vladimir Sibirov, 2013 silverorange
+ * @license   BSD http://opensource.org/licenses/BSD-2-Clause
  */
+class Converter
+{
+	protected static $default_config = array(
+		'database' => array(
+			'dsn' => '',
+		),
+		'github' => array(
+			'username' => '',
+			'password' => '',
+			'project' => '',
+			'repo' => '',
+		),
+		'cache' => array(
+			'milestones' => '/tmp/trac_milestones.list',
+			'tickets' => '/tmp/trac_tickets.list',
+		),
+	);
+
+	public function __invoke()
+	{
+		$parser = \Console_CommandLine::fromXmlFile(__DIR__ . '/cli.xml');
+		$result = $parser->parse();
+		$config = $this->parseConfig($result->options['config']);
+	}
+
+	protected function terminate($message)
+	{
+		fwrite(STDERR, $message);
+		fflush(STDERR);
+		exit(1);
+	}
+
+	protected function parseConfig($filename)
+	{
+		if (!is_readable($filename)) {
+			$this->terminate(
+				sprintf(
+					'Could not open config file "%s" for reading.' . PHP_EOL,
+					$filename
+				)
+			);
+		}
+
+		$config = parse_ini_file($filename, true);
+
+		if ($config === false) {
+			$this->terminate(
+				sprintf(
+					'Config file "%s" is not properly formatted.' . PHP_EOL,
+					$filename
+				)
+			);
+		}
+
+		return array_merge_recursive(
+			self::$default_config,
+			$config
+		);
+	}
+}
+
+$converter = new Converter();
+$converter();
+exit();
+
+
 
 // Edit configuration below
 
