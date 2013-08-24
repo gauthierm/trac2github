@@ -129,24 +129,24 @@ JAVASCRIPT;
 		if ($milestones === null) {
 			$milestones = array();
 			$res = $db->query('select * from milestone order by due');
-			foreach ($res->fetchAll() as $row) {
+			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
 				$resp = $github->addMilestone(
 					array(
-						'title'       => $row['name'],
-						'state'       => ($row['completed'] == 0) ? 'open' : 'closed',
-						'description' => (empty($row['description'])) ? 'None' : $row['description'],
-						'due_on'      => date('Y-m-d\TH:i:s\Z', (int)$row['due'])
+						'title'       => $row->name,
+						'state'       => ($row->completed == 0) ? 'open' : 'closed',
+						'description' => (empty($row->description)) ? 'None' : $row->description,
+						'due_on'      => date('Y-m-d\TH:i:s\Z', (int)$row->due)
 					)
 				);
 
 				if (isset($resp['number'])) {
 					// OK
-					$milestones[sha1($row['name'])] = (int)$resp['number'];
-					echo "Milestone {$row['name']} converted to {$resp['number']}\n";
+					$milestones[sha1($row->name)] = (int)$resp['number'];
+					echo "Milestone {$row->name} converted to {$resp['number']}\n";
 				} else {
 					// Error
 					$error = print_r($resp, 1);
-					echo "Failed to convert milestone {$row['name']}: $error\n";
+					echo "Failed to convert milestone {$row->name}: $error\n";
 				}
 			}
 
@@ -217,11 +217,11 @@ JAVASCRIPT;
 					if (isset($resp['url'])) {
 						// OK
 						$labels[$row->label_type][sha1($row->name)] = $resp['name'];
-						echo "Label {$row['name']} converted to {$resp['name']}\n";
+						echo "Label {$row->name} converted to {$resp['name']}\n";
 					} else {
 						// Error
 						$error = print_r($resp, 1);
-						echo "Failed to convert label {$row['name']}: $error\n";
+						echo "Failed to convert label {$row->name}: $error\n";
 					}
 				}
 			}
