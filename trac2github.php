@@ -457,18 +457,17 @@ if (!$skip_comments) {
 	}
 }
 
-echo "Done whatever possible, sorry if not.\n";
+class MoinMoin2Markdown
+{
+	public static function convert($data)
+	{
+		// Replace code blocks with an associated language
+		$data = preg_replace('/\{\{\{(\s*#!(\w+))?/m', '```$2', $data);
+		$data = preg_replace('/\}\}\}/', '```', $data);
 
-function translate_markup($data) {
-    // Replace code blocks with an associated language
-    $data = preg_replace('/\{\{\{(\s*#!(\w+))?/m', '```$2', $data);
-    $data = preg_replace('/\}\}\}/', '```', $data);
-
-    // Avoid non-ASCII characters, as that will cause trouble with json_encode()
-	$data = preg_replace('/[^(\x00-\x7F)]*/','', $data);
-
-    // Possibly translate other markup as well?
-    return $data;
+		// Possibly translate other markup as well?
+		return $data;
+	}
 }
 
 ?>
