@@ -11,9 +11,9 @@
 	<option name="config">
 		<short_name>-c</short_name>
 		<long_name>--config</long_name>
-		<description>Specify configuration file name. If not specified, config.ini in the current directory is used.</description>
+		<description>Specify configuration file name. If not specified, config.json in the current directory is used.</description>
 		<action>StoreString</action>
-		<default>config.ini</default>
+		<default>config.json</default>
 	</option>
 	<option name="skip_labels">
 		<long_name>--skip-labels</long_name>
