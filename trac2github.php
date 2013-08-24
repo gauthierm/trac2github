@@ -24,8 +24,9 @@ class Converter
 	protected static $default_config = <<<JAVASCRIPT
 {
 	"cache": {
-		"milestones": "/tmp/trac_milestones.list",
-		"tickets": "/tmp/trac_tickets.list"
+		"milestones": "/tmp/trac_milestones.json",
+		"labels": "/tmp/trac_labels.json",
+		"tickets": "/tmp/trac_tickets.json"
 	},
 	"github": {
 		"username": "",
@@ -159,6 +160,19 @@ JAVASCRIPT;
 		}
 
 		return $milestones;
+	}
+
+	public function clearCache(\stdClass $config)
+	{
+		if (file_exists($config->cache->milestones)) {
+			unlink($config->cache->milestones);
+		}
+		if (file_exists($config->cache->labels)) {
+			unlink($config->cache->labels);
+		}
+		if (file_exists($config->cache->tickets)) {
+			unlink($config->cache->tickets);
+		}
 	}
 }
 
@@ -309,11 +323,6 @@ $converter();
 exit();
 
 
-
-// Uncomment to refresh cache
-// @unlink($save_milestones);
-// @unlink($save_labels);
-// @unlink($save_tickets);
 
 $labels = array();
 $labels['T'] = array();

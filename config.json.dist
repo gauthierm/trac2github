@@ -1,7 +1,8 @@
 {
 	"cache": {
-		"milestones": "/tmp/trac_milestones.list",
-		"tickets": "/tmp/trac_tickets.list"
+		"milestones": "/tmp/trac_milestones.json",
+		"labels": "/tmp/trac_labels.json",
+		"tickets": "/tmp/trac_tickets.json"
 	}
 	"github": {
 		"username": "",
