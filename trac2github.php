@@ -118,31 +118,30 @@ JAVASCRIPT;
 	protected function convertMilestones(array $config, \PDO $db,
 		Github $github)
 	{
-		$milestones = false;
+		$milestones = null;
 
-		if (is_readable($config['cache']['milestones'])) {
+		if (is_readable($config->cache->milestones)) {
 			$milestones = json_decode(
-				file_get_contents($config['cache']['milestones']),
-				true
+				file_get_contents($config->cache->milestones)
 			);
 		}
 
-		if ($milestones === false) {
+		if ($milestones === null) {
+			$milestones = array();
 			$res = $db->query('select * from milestone order by due');
-			$mnum = 1;
 			foreach ($res->fetchAll() as $row) {
 				$resp = $github->addMilestone(
 					array(
-						'title' => $row['name'],
-						'state' => $row['completed'] == 0 ? 'open' : 'closed',
-						'description' => empty($row['description']) ? 'None' : $row['description'],
-						'due_on' => date('Y-m-d\TH:i:s\Z', (int) $row['due'])
+						'title'       => $row['name'],
+						'state'       => ($row['completed'] == 0) ? 'open' : 'closed',
+						'description' => (empty($row['description'])) ? 'None' : $row['description'],
+						'due_on'      => date('Y-m-d\TH:i:s\Z', (int)$row['due'])
 					)
 				);
 
 				if (isset($resp['number'])) {
 					// OK
-					$milestones[crc32($row['name'])] = (int) $resp['number'];
+					$milestones[sha1($row['name'])] = (int)$resp['number'];
 					echo "Milestone {$row['name']} converted to {$resp['number']}\n";
 				} else {
 					// Error
@@ -151,15 +150,89 @@ JAVASCRIPT;
 				}
 			}
 
-			if ($config['cache']['milestones'] != '') {
+			if ($config->cache->milestones != '') {
 				file_put_contents(
-					$config['cache']['milestones'],
+					$config->cache->milestones,
 					json_encode($milestones)
 				);
 			}
 		}
 
 		return $milestones;
+	}
+
+	protected function convertLabels(array $config, \PDO $db,
+		Github $github)
+	{
+		$labels = null;
+
+		if (is_readable($config->cache->labels)) {
+			$labels = json_decode(file_get_contents($config->cache->labels));
+		}
+
+		if ($labels === null) {
+			$labels = array(
+				'types'       => array(),
+				'priorities'  => array(),
+				'resolutions' => array(),
+			);
+
+			$res = $db->query(
+				'select distinct \'types\' label_type, lower(type) name
+				from ticket where type is not null and type != \'\'
+				union
+				select distinct \'priorities\' label_type, lower(priority) name
+				from ticket where priority is not null and priority != \'\'
+				union
+				select distinct \'resolutions\' label_type, lower(resolution) name
+				from ticket where resolution is not null and resolution != \'\''
+			);
+
+			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
+				$label_config = null;
+
+				if (   isset($config->trac->{$row->label_type})
+					&& isset($config->trac->{$row->label_type}->{$row->name})
+				) {
+					$label_config =
+						$config->trac->{$row->label_type}->{$row->name};
+
+					if (!isset($label_config->import)) {
+						$label_config->import = false;
+					}
+
+					if (!isset($label_config->color)) {
+						$label_config->color = 'ffffff';
+					}
+				}
+
+				if ($label_config !== null && $label_config->import === true) {
+					$resp = $github->addLabel(
+						array(
+							'name'  => $row->name,
+							'color' => $color
+						)
+					);
+
+					if (isset($resp['url'])) {
+						// OK
+						$labels[$row->label_type][sha1($row->name)] = $resp['name'];
+						echo "Label {$row['name']} converted to {$resp['name']}\n";
+					} else {
+						// Error
+						$error = print_r($resp, 1);
+						echo "Failed to convert label {$row['name']}: $error\n";
+					}
+				}
+			}
+
+			if ($config->cache->labels != '') {
+				file_put_contents(
+					$config->cache->labels,
+					json_encode($labels)
+				);
+			}
+		}
 	}
 
 	public function clearCache(\stdClass $config)
@@ -323,53 +396,6 @@ $converter();
 exit();
 
 
-
-$labels = array();
-$labels['T'] = array();
-$labels['C'] = array();
-$labels['P'] = array();
-$labels['R'] = array();
-if (file_exists($save_labels)) {
-	$labels = unserialize(file_get_contents($save_labels));
-}
-
-if (!$skip_labels) {
-    // Export all "labels"
-	$res = $trac_db->query("SELECT DISTINCT 'T' label_type, type       name, 'cccccc' color
-	                        FROM ticket WHERE IFNULL(type, '')       <> ''
-							UNION
-							SELECT DISTINCT 'C' label_type, component  name, '0000aa' color
-	                        FROM ticket WHERE IFNULL(component, '')  <> ''
-							UNION
-							SELECT DISTINCT 'P' label_type, priority   name, case when lower(priority) = 'urgent' then 'ff0000'
-							                                                      when lower(priority) = 'high'   then 'ff6666'
-																				  when lower(priority) = 'medium' then 'ffaaaa'
-																				  when lower(priority) = 'low'    then 'ffdddd'
-																				  else                                 'aa8888' end color
-	                        FROM ticket WHERE IFNULL(priority, '')   <> ''
-							UNION
-							SELECT DISTINCT 'R' label_type, resolution name, '55ff55' color
-	                        FROM ticket WHERE IFNULL(resolution, '') <> ''");
-
-	foreach ($res->fetchAll() as $row) {
-		$resp = github_add_label(array(
-			'name' => $row['label_type'] . ': ' . $row['name'],
-			'color' => $row['color']
-		));
-
-		if (isset($resp['url'])) {
-			// OK
-			$labels[$row['label_type']][crc32($row['name'])] = $resp['name'];
-			echo "Label {$row['name']} converted to {$resp['name']}\n";
-		} else {
-			// Error
-			$error = print_r($resp, 1);
-			echo "Failed to convert label {$row['name']}: $error\n";
-		}
-	}
-	// Serialize to restore in future
-	file_put_contents($save_labels, serialize($labels));
-}
 
 // Try get previously fetched tickets
 $tickets = array();
