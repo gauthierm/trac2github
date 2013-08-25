@@ -205,39 +205,51 @@ JAVASCRIPT;
 			);
 
 			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
-				$label_config = null;
+				$config = null;
 
 				if (   isset($this->config->trac->{$row->label_type})
 					&& isset($this->config->trac->{$row->label_type}->{$row->name})
 				) {
-					$label_config =
-						$this->config->trac->{$row->label_type}->{$row->name};
-
-					if (!isset($label_config->import)) {
-						$label_config->import = false;
-					}
-
-					if (!isset($label_config->color)) {
-						$label_config->color = 'ffffff';
-					}
+					$config = $this->config->trac->{$row->label_type}->{$row->name};
 				}
 
-				if ($label_config !== null && $label_config->import === true) {
-					$resp = $this->github->addLabel(
-						array(
-							'name'  => $row->name,
-							'color' => $color
-						)
-					);
+				if ($config !== null) {
+					$label = $this->convertLabel($config, $row->name);
+					if ($label !== null) {
+						$labels[$row->label_type][sha1($row->name)] = $label;
+					}
+				}
+			}
 
-					if (isset($resp['url'])) {
-						$labels[$row->label_type][sha1($row->name)] = $resp['name'];
-						echo 'Label ' . $row->name . ' converted to '
-							. $resp['name'] . PHP_EOL;
-					} else {
-						$error = print_r($resp, 1);
-						echo 'Failed to convert label ' . $row->name
-							. ': ' . $error . PHP_EOL;
+			// import new priorities from config
+			$priorities = get_object_vars($this->config->trac->priorities);
+			foreach ($priorities as $name => $config) {
+				if (!isset($labels['priorities'][sha1($name)])) {
+					$label = $this->convertLabel($config, $name);
+					if ($label !== null) {
+						$labels['priorities'][sha1($row->name)] = $label;
+					}
+				}
+			}
+
+			// import new types from config
+			$types = get_object_vars($this->config->trac->types);
+			foreach ($types as $name => $config) {
+				if (!isset($labels['types'][sha1($name)])) {
+					$label = $this->convertLabel($config, $name);
+					if ($label !== null) {
+						$labels['types'][sha1($row->name)] = $label;
+					}
+				}
+			}
+
+			// import new resolutions from config
+			$resolutions = get_object_vars($this->config->trac->resolutions);
+			foreach ($resolutions as $name => $config) {
+				if (!isset($labels['resolutions'][sha1($name)])) {
+					$label = $this->convertLabel($config, $name);
+					if ($label !== null) {
+						$labels['resolutions'][sha1($row->name)] = $label;
 					}
 				}
 			}
@@ -251,6 +263,44 @@ JAVASCRIPT;
 		}
 
 		return $labels;
+	}
+
+	protected function convertLabel(\stdClass $config, $name)
+	{
+		$label = null;
+
+		if (isset($config->import) && $config->import === true) {
+			$resp = $this->github->addLabel(
+				array(
+					'name'  => $name,
+					'color' => $this->getColor($config),
+				)
+			);
+
+			if (isset($resp['url'])) {
+				echo 'Label ' . $row->name . ' converted to '
+					. $resp['name'] . PHP_EOL;
+
+				$label = $resp['name'];
+			} else {
+				$error = print_r($resp, true);
+				echo 'Failed to convert label ' . $row->name
+					. ': ' . $error . PHP_EOL;
+			}
+		}
+
+		return $label;
+	}
+
+	protected function getColor(\stdClass $config, $default = 'ffffff')
+	{
+		$color = $default;
+
+		if (isset($config->color)) {
+			$color = $config->color;
+		}
+
+		return $color;
 	}
 
 	protected function convertTickets(
@@ -294,30 +344,13 @@ JAVASCRIPT;
 
 			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
 
-				$ticket_labels = array();
-
-				$type = sha1($row->type);
-				if (!empty($labels['types'][$type])) {
-					$ticket_labels[] = $labels['types'][$type];
-				}
-
-				$priority = sha1($row->priority);
-				if (!empty($labels['priorities'][$priority])) {
-					$ticket_labels[] = $labels['priorities'][$priority];
-				}
-
-				$resolution = sha1($row->resolution);
-				if (!empty($labels['resolutions'][$resolution])) {
-					$ticket_labels[] = $labels['resolutions'][$resolution];
-				}
-
 				$resp = $this->github->addIssue(
 					array(
 						'title'     => $row->summary,
 						'body'      => $this->getIssueBody($row),
 						'assignee'  => $this->getIssueAssignee($row),
 						'milestone' => $milestones[sha1($row->milestone)],
-						'labels'    => $ticket_labels,
+						'labels'    => $this->getIssueLabels($row),
 					)
 				);
 
@@ -357,12 +390,65 @@ JAVASCRIPT;
 		return $tickets;
 	}
 
+	protected function getIssueLabels(\stdClass $ticket, array $labels)
+	{
+		$labels = array();
+
+		if (isset($this->config->trac->types->{$ticket->type})) {
+			$config = $this->config->trac->types->{$ticket->type};
+			if (isset($config->import)) {
+				if ($config->import === true) {
+					$type = sha1($ticket->type);
+				} else {
+					$type = sha1($config->import);
+				}
+
+				if (isset($labels['types'][$type])) {
+					$labels[] = $labels['types'][$type];
+				}
+			}
+		}
+
+		if (isset($this->config->trac->priorities->{$ticket->priority})) {
+			$config = $this->config->trac->priorities->{$ticket->priority};
+			if (isset($config->import)) {
+				if ($config->import === true) {
+					$priority = sha1($ticket->priority);
+				} else {
+					$priority = sha1($config->import);
+				}
+
+				if (isset($labels['priorities'][$priority])) {
+					$labels[] = $labels['priorities'][$priority];
+				}
+			}
+		}
+
+		if (isset($this->config->trac->resolutions->{$ticket->resolution})) {
+			$config = $this->config->trac->resolutions->{$ticket->resolution};
+			if (isset($config->import)) {
+				if ($config->import === true) {
+					$resolution = sha1($ticket->resolution);
+				} else {
+					$resolution = sha1($config->import);
+				}
+
+				if (isset($labels['resolutions'][$resolution])) {
+					$labels[] = $labels['resolutions'][$resolution];
+				}
+			}
+		}
+
+		return $labels;
+	}
+
 	protected function getIssueBody(\stdClass $ticket)
 	{
-		$body = 'none';
+		$body = sprintf('Trac Ticket #%s', $ticket->id);
 
 		if (!empty($row->description)) {
-			$body = MoinMoin2Markdown::convert($ticket->description);
+			$body .= "\n\n";
+			$body .= MoinMoin2Markdown::convert($ticket->description);
 		}
 
 		return $body
@@ -383,21 +469,50 @@ JAVASCRIPT;
 
 	protected function convertComments(
 	) {
-		if (!$skip_comments) {
-			// Export all comments
-			$limit = $comments_limit > 0 ? "LIMIT $comments_offset, $comments_limit" : '';
-			$res = $trac_db->query("SELECT * FROM `ticket_change` where `field` = 'comment' AND `newvalue` != '' ORDER BY `ticket`, `time` $limit");
-			foreach ($res->fetchAll() as $row) {
+		$comments = null;
+
+		if ($comments === null) {
+			$sql = 'select * from ticket_change '
+				. 'where field = \'comment\' and newvalue != \'\' '
+				. 'order by ticket, time';
+
+			if ($this->cli->options['comment_limit'] > 0) {
+				$sql .= sprintf(
+					' limit %s',
+					$this->db->quote(
+						$this->cli->options['comment_limit'],
+						PDO::PARAM_INT
+					)
+				);
+			}
+
+			if ($this->cli->options['comment_offset'] > 0) {
+				$sql .= sprintf(
+					' offset %s',
+					$this->db->quote(
+						$this->cli->options['comment_offset'],
+						PDO::PARAM_INT
+					)
+				);
+			}
+
+			$res = $this->db->query($sql);
+
+			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
 				$text = strtolower($row['author']) == strtolower($username) ? $row['newvalue'] : '**Author: ' . $row['author'] . "**\n" . $row['newvalue'];
-				$resp = github_add_comment($tickets[$row['ticket']], translate_markup($text));
+
+				$resp = $this->github->addComment(
+					$tickets[$row->ticket],
+					translate_markup($text)
+				);
+
 				if (isset($resp['url'])) {
-					// OK
 					echo "Added comment {$resp['url']}\n";
 				} else {
-					// Error
-					$error = print_r($resp, 1);
+					$error = print_r($resp, true);
 					echo "Failed to add a comment: $error\n";
 				}
+			}
 		}
 	}
 
