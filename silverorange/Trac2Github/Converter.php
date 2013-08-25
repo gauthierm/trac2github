@@ -137,18 +137,18 @@ JAVASCRIPT;
 						'title'       => $row->name,
 						'state'       => ($row->completed == 0) ? 'open' : 'closed',
 						'description' => $this->getMilestoneDescription($row),
-						'due_on'      => date('Y-m-d\TH:i:s\Z', (int)$row->due)
+						'due_on'      => date('Y-m-d\TH:i:s\Z', (int)$row->due),
 					)
 				);
 
 				if (isset($resp['number'])) {
-					// OK
 					$milestones[sha1($row->name)] = (int)$resp['number'];
-					echo "Milestone {$row->name} converted to {$resp['number']}\n";
+					echo 'Milestone ' . $row->name . ' converted to '
+						. $resp['number'] . PHP_EOL;
 				} else {
-					// Error
-					$error = print_r($resp, 1);
-					echo "Failed to convert milestone {$row->name}: $error\n";
+					$error = print_r($resp, true);
+					echo 'Failed to convert milestone ' . $row->name . ': '
+						. $error . PHP_EOL;
 				}
 			}
 
@@ -231,13 +231,13 @@ JAVASCRIPT;
 					);
 
 					if (isset($resp['url'])) {
-						// OK
 						$labels[$row->label_type][sha1($row->name)] = $resp['name'];
-						echo "Label {$row->name} converted to {$resp['name']}\n";
+						echo 'Label ' . $row->name . ' converted to '
+							. $resp['name'] . PHP_EOL;
 					} else {
-						// Error
 						$error = print_r($resp, 1);
-						echo "Failed to convert label {$row->name}: $error\n";
+						echo 'Failed to convert label ' . $row->name
+							. ': ' . $error . PHP_EOL;
 					}
 				}
 			}
@@ -322,11 +322,11 @@ JAVASCRIPT;
 				);
 
 				if (isset($resp['number'])) {
-					// OK
 					$tickets[$row->id] = (int)$resp['number'];
-					echo "Ticket #{$row->id} converted to issue #{$resp['number']}\n";
+					echo 'Ticket #' . $row->id . ' converted to issue '
+						. '#' . $resp['number'] . PHP_EOL;
+
 					if ($row->status === 'closed') {
-						// Close the issue
 						$resp = $this->github->updateIssue(
 							$resp['number'],
 							array(
@@ -334,14 +334,15 @@ JAVASCRIPT;
 							)
 						);
 						if (isset($resp['number'])) {
-							echo "Closed issue #{$resp['number']}\n";
+							echo '=> closed issue # ' . $resp['number']
+								. PHP_EOL;
 						}
 					}
 
 				} else {
-					// Error
 					$error = print_r($resp, 1);
-					echo "Failed to convert a ticket #{$row->id}: $error\n";
+					echo 'Failed to convert ticket #' . $row->id . ': '
+						. $error . PHP_EOL;
 				}
 			}
 
@@ -405,9 +406,11 @@ JAVASCRIPT;
 		if (file_exists($config->cache->milestones)) {
 			unlink($config->cache->milestones);
 		}
+
 		if (file_exists($config->cache->labels)) {
 			unlink($config->cache->labels);
 		}
+
 		if (file_exists($config->cache->tickets)) {
 			unlink($config->cache->tickets);
 		}
