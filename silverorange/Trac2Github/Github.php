@@ -40,23 +40,40 @@ class Github
 			$this->config->github->password
 		);
 
-		$ch = curl_init();
-		curl_setopt($ch, CURLOPT_USERPWD, $auth);
-		curl_setopt($ch, CURLOPT_URL, "https://api.github.com$url");
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-		curl_setopt($ch, CURLOPT_HEADER, false);
-		curl_setopt($ch, CURLOPT_POST, true);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $json);
-		curl_setopt($ch, CURLOPT_USERAGENT, $ua);
+		$url = 'https://api.github.com' . $url;
+
+		$ch = curl_init($url);
+
+		curl_setopt_array(
+			$ch,
+			array(
+				CURLOPT_USERPWD        => $auth,
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_SSL_VERIFYPEER => true,
+				CURLOPT_POSTFIELDS     => $json,
+				CURLOPT_USERAGENT      => $ua,
+				CURLOPT_HTTPHEADER     => array(
+					'Content-Type: application/json'
+				),
+			)
+		);
+
 		if ($patch) {
 			curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PATCH');
+		} else {
+			curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
 		}
+
 		$ret = curl_exec($ch);
-		if (!$ret) {
+
+		if ($ret === false) {
+			$error = curl_error($ch);
 			curl_close($ch);
-			throw new Github_Exception(curl_error($ch));
+			throw new Github_Exception($error);
 		}
+
+		curl_close($ch);
+
 		return $ret;
 	}
 
