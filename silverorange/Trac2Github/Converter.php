@@ -4,6 +4,7 @@ namespace silverorange\Trac2Github;
 
 require_once 'Console/CommandLine.php';
 require_once 'silverorange/Trac2Github/Github.php';
+require_once 'silverorange/Trac2Github/MoinMoin2Markdown.php';
 
 /**
  * @package   trac2github
@@ -41,26 +42,31 @@ class Converter
 }
 JAVASCRIPT;
 
+	protected $config = null;
+	protected $parser = null;
+	protected $db = null;
+	protected $github = null;
+
 	public function __invoke()
 	{
 		$parser = \Console_CommandLine::fromXmlFile(
 			__DIR__ . '/../../data/cli.xml'
 		);
-		$result = $parser->parse();
-		$config = $this->parseConfig($result->options['config']);
+		$this->cli = $parser->parse();
+		$this->config = $this->parseConfig($this->cli->options['config']);
 
 		try {
-			$db = new \PDO($config->trac->database->dsn);
+			$db = new \PDO($this->config->trac->database->dsn);
 		} catch (\PDOException $e) {
 			$this->terminate(
 				sprintf(
 					'Unable to connect to database "%s"' . PHP_EOL,
-					$config->trac->database->dsn
+					$this->config->trac->database->dsn
 				)
 			);
 		}
 
-		$github = new GitHub($config, $result);
+		$this->github = new GitHub($this->config, $this->cli);
 	}
 
 	protected function terminate($message)
@@ -112,26 +118,25 @@ JAVASCRIPT;
 		return $merge($default_config, $config);
 	}
 
-	protected function convertMilestones(array $config, \PDO $db,
-		Github $github)
+	protected function convertMilestones()
 	{
 		$milestones = null;
 
-		if (is_readable($config->cache->milestones)) {
+		if (is_readable($this->config->cache->milestones)) {
 			$milestones = json_decode(
-				file_get_contents($config->cache->milestones)
+				file_get_contents($this->config->cache->milestones)
 			);
 		}
 
 		if ($milestones === null) {
 			$milestones = array();
-			$res = $db->query('select * from milestone order by due');
+			$res = $this->db->query('select * from milestone order by due');
 			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
-				$resp = $github->addMilestone(
+				$resp = $this->github->addMilestone(
 					array(
 						'title'       => $row->name,
 						'state'       => ($row->completed == 0) ? 'open' : 'closed',
-						'description' => (empty($row->description)) ? 'None' : $row->description,
+						'description' => $this->getMilestoneDescription($row),
 						'due_on'      => date('Y-m-d\TH:i:s\Z', (int)$row->due)
 					)
 				);
@@ -147,9 +152,9 @@ JAVASCRIPT;
 				}
 			}
 
-			if ($config->cache->milestones != '') {
+			if ($this->config->cache->milestones != '') {
 				file_put_contents(
-					$config->cache->milestones,
+					$this->config->cache->milestones,
 					json_encode($milestones)
 				);
 			}
@@ -158,13 +163,27 @@ JAVASCRIPT;
 		return $milestones;
 	}
 
-	protected function convertLabels(array $config, \PDO $db,
-		Github $github)
+	protected function getMilestoneDescription($milestone)
+	{
+		$description = 'none';
+
+		if ($milestone->description != '') {
+			$description = MoinMoin2Markdown::convert($milestone->description);
+		}
+
+		return $description;
+	}
+
+	protected function convertLabels()
 	{
 		$labels = null;
 
-		if (is_readable($config->cache->labels)) {
-			$labels = json_decode(file_get_contents($config->cache->labels));
+		if (is_readable($this->config->cache->labels)) {
+			$labels = json_decode(
+				file_get_contents(
+					$this->config->cache->labels
+				)
+			);
 		}
 
 		if ($labels === null) {
@@ -174,7 +193,7 @@ JAVASCRIPT;
 				'resolutions' => array(),
 			);
 
-			$res = $db->query(
+			$res = $this->db->query(
 				'select distinct \'types\' label_type, lower(type) name
 				from ticket where type is not null and type != \'\'
 				union
@@ -188,11 +207,11 @@ JAVASCRIPT;
 			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
 				$label_config = null;
 
-				if (   isset($config->trac->{$row->label_type})
-					&& isset($config->trac->{$row->label_type}->{$row->name})
+				if (   isset($this->config->trac->{$row->label_type})
+					&& isset($this->config->trac->{$row->label_type}->{$row->name})
 				) {
 					$label_config =
-						$config->trac->{$row->label_type}->{$row->name};
+						$this->config->trac->{$row->label_type}->{$row->name};
 
 					if (!isset($label_config->import)) {
 						$label_config->import = false;
@@ -204,7 +223,7 @@ JAVASCRIPT;
 				}
 
 				if ($label_config !== null && $label_config->import === true) {
-					$resp = $github->addLabel(
+					$resp = $this->github->addLabel(
 						array(
 							'name'  => $row->name,
 							'color' => $color
@@ -223,12 +242,161 @@ JAVASCRIPT;
 				}
 			}
 
-			if ($config->cache->labels != '') {
+			if ($this->config->cache->labels != '') {
 				file_put_contents(
-					$config->cache->labels,
+					$this->config->cache->labels,
 					json_encode($labels)
 				);
 			}
+		}
+
+		return $labels;
+	}
+
+	protected function convertTickets(
+		array $milestones,
+		array $labels
+	) {
+		$tickets = null;
+
+		if (is_readable($config->cache->tickets)) {
+			$tickets = json_decode(
+				file_get_contents(
+					$this->config->cache->tickets
+				)
+			);
+		}
+
+		if ($tickets === null) {
+			$sql = 'select * from ticket order by id';
+
+			if ($this->cli->options['ticket_limit'] > 0) {
+				$sql .= sprintf(
+					' limit %s',
+					$this->db->quote(
+						$this->cli->options['ticket_limit'],
+						PDO::PARAM_INT
+					)
+				);
+			}
+
+			if ($this->cli->options['ticket_offset'] > 0) {
+				$sql .= sprintf(
+					' offset %s',
+					$this->db->quote(
+						$this->cli->options['ticket_offset'],
+						PDO::PARAM_INT
+					)
+				);
+			}
+
+			$res = $this->db->query($sql);
+
+			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
+
+				$ticket_labels = array();
+
+				$type = sha1($row->type);
+				if (!empty($labels['types'][$type])) {
+					$ticket_labels[] = $labels['types'][$type];
+				}
+
+				$priority = sha1($row->priority);
+				if (!empty($labels['priorities'][$priority])) {
+					$ticket_labels[] = $labels['priorities'][$priority];
+				}
+
+				$resolution = sha1($row->resolution);
+				if (!empty($labels['resolutions'][$resolution])) {
+					$ticket_labels[] = $labels['resolutions'][$resolution];
+				}
+
+				$resp = $this->github->addIssue(
+					array(
+						'title'     => $row->summary,
+						'body'      => $this->getIssueBody($row),
+						'assignee'  => $this->getIssueAssignee($row),
+						'milestone' => $milestones[sha1($row->milestone)],
+						'labels'    => $ticket_labels,
+					)
+				);
+
+				if (isset($resp['number'])) {
+					// OK
+					$tickets[$row->id] = (int)$resp['number'];
+					echo "Ticket #{$row->id} converted to issue #{$resp['number']}\n";
+					if ($row->status === 'closed') {
+						// Close the issue
+						$resp = $this->github->updateIssue(
+							$resp['number'],
+							array(
+								'state' => 'closed'
+							)
+						);
+						if (isset($resp['number'])) {
+							echo "Closed issue #{$resp['number']}\n";
+						}
+					}
+
+				} else {
+					// Error
+					$error = print_r($resp, 1);
+					echo "Failed to convert a ticket #{$row->id}: $error\n";
+				}
+			}
+
+			if ($this->config->cache->tickets != '') {
+				file_put_contents(
+					$this->config->cache->tickets,
+					json_encode($tickets)
+				);
+			}
+		}
+
+		return $tickets;
+	}
+
+	protected function getIssueBody(\stdClass $ticket)
+	{
+		$body = 'none';
+
+		if (!empty($row->description)) {
+			$body = MoinMoin2Markdown::convert($ticket->description);
+		}
+
+		return $body
+	}
+
+	protected function getIssueAssignee(\stdClass $ticket)
+	{
+		// set default user for tickets with no user or tickets with
+		// users that are not to be imported
+		$assignee = $this->config->github->username;
+
+		if (isset($this->config->trac->users->{$ticket->owner})) {
+			$assignee = $this->config->trac->users->{$ticket->owner};
+		}
+
+		return $assignee;
+	}
+
+	protected function convertComments(
+	) {
+		if (!$skip_comments) {
+			// Export all comments
+			$limit = $comments_limit > 0 ? "LIMIT $comments_offset, $comments_limit" : '';
+			$res = $trac_db->query("SELECT * FROM `ticket_change` where `field` = 'comment' AND `newvalue` != '' ORDER BY `ticket`, `time` $limit");
+			foreach ($res->fetchAll() as $row) {
+				$text = strtolower($row['author']) == strtolower($username) ? $row['newvalue'] : '**Author: ' . $row['author'] . "**\n" . $row['newvalue'];
+				$resp = github_add_comment($tickets[$row['ticket']], translate_markup($text));
+				if (isset($resp['url'])) {
+					// OK
+					echo "Added comment {$resp['url']}\n";
+				} else {
+					// Error
+					$error = print_r($resp, 1);
+					echo "Failed to add a comment: $error\n";
+				}
 		}
 	}
 
