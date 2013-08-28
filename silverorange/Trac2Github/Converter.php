@@ -31,10 +31,25 @@ class Converter
 JAVASCRIPT;
 
 	// }}}
+	// {{{ protected properties
 
+	/**
+	 * @var \stdClass
+	 */
 	protected $config = null;
+
+	/**
+	 * @var Console_CommandLine_Result
+	 */
 	protected $cli = null;
+
+	/**
+	 * @var \PDO
+	 */
 	protected $db = null;
+
+	// }}}
+	// {{{ __invoke()
 
 	public function __invoke()
 	{
@@ -65,6 +80,9 @@ JAVASCRIPT;
 		$issues     = $this->convertIssues($milestones);
 	}
 
+	// }}}
+	// {{{ terminate()
+
 	protected function terminate($message)
 	{
 		fwrite(STDERR, $message);
@@ -72,6 +90,7 @@ JAVASCRIPT;
 		exit(1);
 	}
 
+	// }}}
 	// {{{ parseConfig()
 
 	protected function parseConfig($filename)
@@ -192,11 +211,7 @@ JAVASCRIPT;
 		$milestone->due_on      = $this->getDate($row->due);
 		$milestone->created_at  = $this->getDate($row->createdate);
 
-		if (version_compare('5.4.0', PHP_VERSION, 'le')) {
-			$content = json_encode($milestone, JSON_PRETTY_PRINT);
-		} else {
-			$content = json_encode($milestone);
-		}
+		$content = $this->encode($milestone);
 
 		$filename = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
 			. 'milestones' . DIRECTORY_SEPARATOR . $id . '.json';
@@ -243,9 +258,8 @@ JAVASCRIPT;
 	// }}}
 	// {{{ convertIssues()
 
-	protected function convertIssues(
-		array $milestones
-	) {
+	protected function convertIssues(array $milestones)
+	{
 		if ($this->cli->options['verbose']) {
 			echo 'Exporting issues:' . PHP_EOL . PHP_EOL;
 		}
@@ -275,7 +289,13 @@ JAVASCRIPT;
 
 		$id = 1;
 		foreach ($statement->fetchAll(\PDO::FETCH_OBJ) as $row) {
-			$issues[$id] = $this->convertIssue($milestones, $id, $row);
+			$issue = new \stdClass();
+
+			$issue->id   = $id;
+			$issue->data = $this->convertIssue($milestones, $id, $row);
+
+			$issues[$row->id] = $issue;
+
 			$id++;
 		}
 
@@ -306,11 +326,7 @@ JAVASCRIPT;
 			$issue->milestone = $milestones[$row->milestone]->id;
 		}
 
-		if (version_compare('5.4.0', PHP_VERSION, 'le')) {
-			$content = json_encode($issue, JSON_PRETTY_PRINT);
-		} else {
-			$content = json_encode($issue);
-		}
+		$content = $this->encode($issue);
 
 		$filename = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
 			. 'issues' . DIRECTORY_SEPARATOR . $id . '.json';
@@ -321,6 +337,8 @@ JAVASCRIPT;
 			echo $content;
 			echo PHP_EOL;
 		}
+
+		$this->convertIssueComments($id, $row);
 
 		return $issue;
 	}
@@ -507,53 +525,89 @@ JAVASCRIPT;
 	}
 
 	// }}}
+	// {{{ convertIssueComments()
 
-	protected function convertComments(
-	) {
-		$comments = null;
+	protected function convertIssueComments($id, \stdClass $ticket)
+	{
+		if ($this->cli->options['verbose']) {
+			echo 'Exporting issue comments for ticket #' . $ticket->id . ':'
+				. PHP_EOL . PHP_EOL;
+		}
 
-		if ($comments === null) {
-			$sql = 'select * from ticket_change '
-				. 'where field = \'comment\' and newvalue != \'\' '
-				. 'order by ticket, time';
+		$comments = array();
 
-			if ($this->cli->options['comment_limit'] > 0) {
-				$sql .= sprintf(
-					' limit %s',
-					$this->db->quote(
-						$this->cli->options['comment_limit'],
-						PDO::PARAM_INT
-					)
-				);
-			}
+		static $statement = null;
 
-			if ($this->cli->options['comment_offset'] > 0) {
-				$sql .= sprintf(
-					' offset %s',
-					$this->db->quote(
-						$this->cli->options['comment_offset'],
-						PDO::PARAM_INT
-					)
-				);
-			}
+		if ($statement === null) {
+			$statement = $this->db->prepare(
+				'select * from ticket_change
+				where field = \'comment\' and newvalue != \'\'
+					and ticket = :ticket
+				order by time'
+			);
+		}
 
-			$res = $this->db->query($sql);
+		$statement->bindParam(':ticket', $ticket->id, \PDO::PARAM_STR);
+		$statement->execute();
 
-			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
-				$text = strtolower($row['author']) == strtolower($username) ? $row['newvalue'] : '**Author: ' . $row['author'] . "**\n" . $row['newvalue'];
+		foreach ($statement->fetchAll(\PDO::FETCH_OBJ) as $row) {
+			$comments[] = $this->convertIssueComment($row);
+		}
 
-				$resp = $this->github->addComment(
-					$tickets[$row->ticket],
-					translate_markup($text)
-				);
+		if (count($comments) > 0) {
+			$content = $this->encode($comments);
 
-				if (isset($resp['url'])) {
-					echo "Added comment {$resp['url']}\n";
-				} else {
-					$error = print_r($resp, true);
-					echo "Failed to add a comment: $error\n";
-				}
+			$filename = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
+				. 'issues' . DIRECTORY_SEPARATOR . $id . '.comments.json';
+
+			file_put_contents($filename, $content);
+
+			if ($this->cli->options['verbose']) {
+				echo $content;
+				echo PHP_EOL;
 			}
 		}
+
+		return $comments;
 	}
+
+	// }}}
+	// {{{ convertIssueComment()
+
+	protected function convertIssueComment(\stdClass $row)
+	{
+		$comment = new \stdClass();
+
+		$comment->user       = $this->getUser($row->author);
+		$comment->created_at = $this->getDate($row->time);
+		$comment->body       = $this->getIssueCommentBody($row);
+
+		return $comment;
+	}
+
+	// }}}
+	// {{{ getIssueCommentBody()
+
+	protected function getIssueCommentBody(\stdClass $row)
+	{
+		$body = $row->newvalue;
+		$body = str_replace("\r\n", "\n", $body);
+		return MoinMoin2Markdown::convert($body);
+	}
+
+	// }}}
+	// {{{ encode()
+
+	protected function encode($data)
+	{
+		if (version_compare('5.4.0', PHP_VERSION, 'le')) {
+			$content = json_encode($data, JSON_PRETTY_PRINT);
+		} else {
+			$content = json_encode($data);
+		}
+
+		return $content;
+	}
+
+	// }}}
 }
