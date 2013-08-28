@@ -62,6 +62,7 @@ JAVASCRIPT;
 		}
 
 		$milestones = $this->convertMilestones();
+		$issues     = $this->convertIssues($milestones);
 	}
 
 	protected function terminate($message)
@@ -116,6 +117,14 @@ JAVASCRIPT;
 	}
 
 	// }}}
+	// {{{ getDate()
+
+	protected function getDate($timestamp)
+	{
+		return date('Y-m-d\TH:i:s\Z', (int)$timestamp);
+	}
+
+	// }}}
 	// {{{ convertMilestones()
 
 	protected function convertMilestones()
@@ -124,14 +133,14 @@ JAVASCRIPT;
 			echo 'Exporting milestones:' . PHP_EOL . PHP_EOL;
 		}
 
-		$milestones = array();
-
 		$directory = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
 			. 'milestones';
 
 		if (!file_exists($directory)) {
 			mkdir($directory, 0770, true);
 		}
+
+		$milestones = array();
 
 		$statement = $this->db->prepare(
 			'select milestone.*, min(ticket.time) as createdate
@@ -180,8 +189,8 @@ JAVASCRIPT;
 		$milestone->title       = $row->name;
 		$milestone->state       = ($row->completed == 0) ? 'open' : 'closed';
 		$milestone->description = $this->getMilestoneDescription($row);
-		$milestone->due_on      = date('Y-m-d\TH:i:s\Z', (int)$row->due);
-		$milestone->created_at  = date('Y-m-d\TH:i:s\Z', (int)$row->createdate);
+		$milestone->due_on      = $this->getDate($row->due);
+		$milestone->created_at  = $this->getDate($row->createdate);
 
 		if (version_compare('5.4.0', PHP_VERSION, 'le')) {
 			$content = json_encode($milestone, JSON_PRETTY_PRINT);
@@ -348,92 +357,116 @@ JAVASCRIPT;
 		return $color;
 	}
 
-	protected function convertTickets(
-		array $milestones,
-		array $labels
-	) {
-		$tickets = null;
+	// {{{ convertIssues()
 
-		if (is_readable($config->cache->tickets)) {
-			$tickets = json_decode(
-				file_get_contents(
-					$this->config->cache->tickets
-				)
+	protected function convertIssues(
+		array $milestones
+	) {
+		if ($this->cli->options['verbose']) {
+			echo 'Exporting issues:' . PHP_EOL . PHP_EOL;
+		}
+
+		$directory = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
+			. 'issues';
+
+		if (!file_exists($directory)) {
+			mkdir($directory, 0770, true);
+		}
+
+		$issues = array();
+
+		$statement = $this->db->prepare(
+			'select * from ticket
+			where component = :component
+			order by id'
+		);
+
+		$statement->bindParam(
+			':component',
+			$this->cli->args['component'],
+			\PDO::PARAM_STR
+		);
+
+		$statement->execute();
+
+		$id = 1;
+		foreach ($statement->fetchAll(\PDO::FETCH_OBJ) as $row) {
+			$issues[$id] = $this->convertIssue($milestones, $id, $row);
+			$id++;
+		}
+
+		return $issues;
+	}
+
+	// }}}
+	// {{{ convertIssue()
+
+	protected function convertIssue(array $milestones, $id, \stdClass $row)
+	{
+		$issue = new \stdClass();
+
+		$issue->title      = $row->summary;
+		$issue->body       = $this->getIssueBody($row);
+		$issue->assignee   = $this->getIssueAsignee($row->owner);
+		$issue->user       = $this->getUser($row->reporter);
+//		$issue->labels     = $this->getIssueLabels($row);
+		$issue->created_at = $this->getDate($row->time);
+		$issue->updated_at = $this->getDate($row->changetime);
+		$issue->state      = ($row->status === 'closed') ? 'closed' : 'open';
+
+		if ($row->status === 'closed') {
+			$issue->closed_at = $this->getIssueClosedAt($row);
+		}
+
+		if ($row->milestone != '') {
+			$issue->milestone = $milestones[$row->milestone]->id;
+		}
+
+		if (version_compare('5.4.0', PHP_VERSION, 'le')) {
+			$content = json_encode($issue, JSON_PRETTY_PRINT);
+		} else {
+			$content = json_encode($issue);
+		}
+
+		$filename = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
+			. 'issues' . DIRECTORY_SEPARATOR . $id . '.json';
+
+		file_put_contents($filename, $content);
+
+		if ($this->cli->options['verbose']) {
+			echo $content;
+			echo PHP_EOL;
+		}
+
+		return $issue;
+	}
+
+	// }}}
+	// {{{ getIssueClosedAt()
+
+	protected function getIssueClosedAt(\stdClass $ticket)
+	{
+		static $statement = null;
+
+		if ($statement === null) {
+			$statement = $this->db->prepare(
+				'select max(time) as closed_at
+				from ticket_change
+				where field = \'status\' and newvalue = \'closed\'
+					and ticket = :ticket
+				group by ticket'
 			);
 		}
 
-		if ($tickets === null) {
-			$sql = 'select * from ticket order by id';
+		$statement->bindParam(':ticket', $ticket->id, \PDO::PARAM_INT);
+		$statement->execute();
 
-			if ($this->cli->options['ticket_limit'] > 0) {
-				$sql .= sprintf(
-					' limit %s',
-					$this->db->quote(
-						$this->cli->options['ticket_limit'],
-						PDO::PARAM_INT
-					)
-				);
-			}
+		$time = $statement->fetchColumn();
 
-			if ($this->cli->options['ticket_offset'] > 0) {
-				$sql .= sprintf(
-					' offset %s',
-					$this->db->quote(
-						$this->cli->options['ticket_offset'],
-						PDO::PARAM_INT
-					)
-				);
-			}
-
-			$res = $this->db->query($sql);
-
-			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
-
-				$resp = $this->github->addIssue(
-					array(
-						'title'     => $row->summary,
-						'body'      => $this->getIssueBody($row),
-						'assignee'  => $this->getIssueAssignee($row),
-						'milestone' => $milestones[sha1($row->milestone)],
-						'labels'    => $this->getIssueLabels($row),
-					)
-				);
-
-				if (isset($resp['number'])) {
-					$tickets[$row->id] = (int)$resp['number'];
-					echo 'Ticket #' . $row->id . ' converted to issue '
-						. '#' . $resp['number'] . PHP_EOL;
-
-					if ($row->status === 'closed') {
-						$resp = $this->github->updateIssue(
-							$resp['number'],
-							array(
-								'state' => 'closed'
-							)
-						);
-						if (isset($resp['number'])) {
-							echo '=> closed issue # ' . $resp['number']
-								. PHP_EOL;
-						}
-					}
-
-				} else {
-					$error = print_r($resp, 1);
-					echo 'Failed to convert ticket #' . $row->id . ': '
-						. $error . PHP_EOL;
-				}
-			}
-
-			if ($this->config->cache->tickets != '') {
-				file_put_contents(
-					$this->config->cache->tickets,
-					json_encode($tickets)
-				);
-			}
-		}
-
-		return $tickets;
+		return $this->getDate($time);
 	}
+
+	// }}}
 
 	protected function getIssueLabels(\stdClass $ticket, array $labels)
 	{
@@ -487,10 +520,50 @@ JAVASCRIPT;
 		return $labels;
 	}
 
+	// {{{ getIssueBody()
+
 	protected function getIssueBody(\stdClass $ticket)
 	{
 		$body = sprintf('Trac Ticket #%s', $ticket->id);
 
+		$filteredCCs = array();
+
+		// Get ticket CCs
+		if ($ticket->cc != '') {
+			$ccs = trim(preg_replace('/[,\s]+/', ' ', $ticket->cc));
+			$ccs = explode(' ', $ccs);
+			foreach ($ccs as $cc) {
+				$cc = $this->getUser($cc);
+				if ($cc !== null) {
+					$filteredCCs[] = '@' . $cc;
+				}
+			}
+		}
+
+		// Github can only have one assignee, add extra assignees to the CC
+		// row.
+		$names = trim(preg_replace('/[,\s]+/', ' ', $ticket->owner));
+		$names = explode(' ', $names);
+		if (count($names) > 1) {
+			array_shift($names);
+			foreach ($names as $cc) {
+				$cc = $this->getUser($cc);
+				if ($cc !== null) {
+					$filteredCCs[] = '@' . $cc;
+				}
+			}
+		}
+
+		// remove duplicates in case user was CC'd and assigned
+		$filteredCCs = array_unique($filteredCCs);
+
+		// Add ticket CC list as second line.
+		if (count($filteredCCs) > 0) {
+			$body .= "\n\n";
+			$body .= "CC'd: " . implode(', ', $filteredCCs);
+		}
+
+		// convert body to markdown
 		if (!empty($row->description)) {
 			$body .= "\n\n";
 			$body .= MoinMoin2Markdown::convert($ticket->description);
@@ -499,18 +572,37 @@ JAVASCRIPT;
 		return $body;
 	}
 
-	protected function getIssueAssignee(\stdClass $ticket)
-	{
-		// set default user for tickets with no user or tickets with
-		// users that are not to be imported
-		$assignee = $this->config->github->username;
+	// }}}
+	// {{{ getIssueAsignee()
 
-		if (isset($this->config->trac->users->{$ticket->owner})) {
-			$assignee = $this->config->trac->users->{$ticket->owner};
+	protected function getIssueAsignee($name)
+	{
+		$name = trim(preg_replace('/[,\s]+/', ' ', $name));
+
+		// Github can only have one assignee, just take first one
+		$names = explode(' ', $name);
+		$name  = $names[0];
+
+		return $this->getUser($name);
+	}
+
+	// }}}
+	// {{{ getUser()
+
+	protected function getUser($tracUser, $default = null)
+	{
+		$user = $default;
+
+		$tracUser = strtolower($tracUser);
+
+		if (isset($this->config->users->$tracUser)) {
+			$user = $this->config->users->$tracUser;
 		}
 
-		return $assignee;
+		return $user;
 	}
+
+	// }}}
 
 	protected function convertComments(
 	) {
