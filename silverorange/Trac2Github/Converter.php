@@ -227,124 +227,7 @@ JAVASCRIPT;
 	}
 
 	// }}}
-
-	protected function convertLabels()
-	{
-		$labels = null;
-
-		if (is_readable($this->config->cache->labels)) {
-			$labels = json_decode(
-				file_get_contents(
-					$this->config->cache->labels
-				)
-			);
-		}
-
-		if ($labels === null) {
-			$labels = array(
-				'types'       => array(),
-				'priorities'  => array(),
-				'resolutions' => array(),
-			);
-
-			$res = $this->db->query(
-				'select distinct \'types\' label_type, lower(type) name
-				from ticket where type is not null and type != \'\'
-				union
-				select distinct \'priorities\' label_type, lower(priority) name
-				from ticket where priority is not null and priority != \'\'
-				union
-				select distinct \'resolutions\' label_type, lower(resolution) name
-				from ticket where resolution is not null and resolution != \'\''
-			);
-
-			foreach ($res->fetchAll(\PDO::FETCH_OBJ) as $row) {
-				$config = null;
-
-				if (   isset($this->config->trac->{$row->label_type})
-					&& isset($this->config->trac->{$row->label_type}->{$row->name})
-				) {
-					$config = $this->config->trac->{$row->label_type}->{$row->name};
-				}
-
-				if ($config !== null) {
-					$label = $this->convertLabel($config, $row->name);
-					if ($label !== null) {
-						$labels[$row->label_type][sha1($row->name)] = $label;
-					}
-				}
-			}
-
-			// import new priorities from config
-			$priorities = get_object_vars($this->config->trac->priorities);
-			foreach ($priorities as $name => $config) {
-				if (!isset($labels['priorities'][sha1($name)])) {
-					$label = $this->convertLabel($config, $name);
-					if ($label !== null) {
-						$labels['priorities'][sha1($row->name)] = $label;
-					}
-				}
-			}
-
-			// import new types from config
-			$types = get_object_vars($this->config->trac->types);
-			foreach ($types as $name => $config) {
-				if (!isset($labels['types'][sha1($name)])) {
-					$label = $this->convertLabel($config, $name);
-					if ($label !== null) {
-						$labels['types'][sha1($row->name)] = $label;
-					}
-				}
-			}
-
-			// import new resolutions from config
-			$resolutions = get_object_vars($this->config->trac->resolutions);
-			foreach ($resolutions as $name => $config) {
-				if (!isset($labels['resolutions'][sha1($name)])) {
-					$label = $this->convertLabel($config, $name);
-					if ($label !== null) {
-						$labels['resolutions'][sha1($row->name)] = $label;
-					}
-				}
-			}
-
-			if ($this->config->cache->labels != '') {
-				file_put_contents(
-					$this->config->cache->labels,
-					json_encode($labels)
-				);
-			}
-		}
-
-		return $labels;
-	}
-
-	protected function convertLabel(\stdClass $config, $name)
-	{
-		$label = null;
-
-		if (isset($config->import) && $config->import === true) {
-			$resp = $this->github->addLabel(
-				array(
-					'name'  => $name,
-					'color' => $this->getColor($config),
-				)
-			);
-
-			if (isset($resp['url'])) {
-				echo 'Label ' . $row->name . ' converted to '
-					. $resp['name'] . PHP_EOL;
-
-				$label = $resp['name'];
-			} else {
-				$error = print_r($resp, true);
-				echo 'Failed to convert label ' . $row->name
-					. ': ' . $error . PHP_EOL;
-			}
-		}
-
-		return $label;
-	}
+	// {{{ getColor()
 
 	protected function getColor(\stdClass $config, $default = 'ffffff')
 	{
@@ -357,6 +240,7 @@ JAVASCRIPT;
 		return $color;
 	}
 
+	// }}}
 	// {{{ convertIssues()
 
 	protected function convertIssues(
@@ -409,7 +293,7 @@ JAVASCRIPT;
 		$issue->body       = $this->getIssueBody($row);
 		$issue->assignee   = $this->getIssueAsignee($row->owner);
 		$issue->user       = $this->getUser($row->reporter);
-//		$issue->labels     = $this->getIssueLabels($row);
+		$issue->labels     = $this->getIssueLabels($row);
 		$issue->created_at = $this->getDate($row->time);
 		$issue->updated_at = $this->getDate($row->changetime);
 		$issue->state      = ($row->status === 'closed') ? 'closed' : 'open';
@@ -467,59 +351,79 @@ JAVASCRIPT;
 	}
 
 	// }}}
+	// {{{ getIssueLabels()
 
-	protected function getIssueLabels(\stdClass $ticket, array $labels)
+	protected function getIssueLabels(\stdClass $ticket)
 	{
 		$labels = array();
 
-		if (isset($this->config->trac->types->{$ticket->type})) {
-			$config = $this->config->trac->types->{$ticket->type};
+		if (isset($this->config->types->{$ticket->type})) {
+			$config = $this->config->types->{$ticket->type};
 			if (isset($config->import)) {
+				$label = new \stdClass();
+
 				if ($config->import === true) {
-					$type = sha1($ticket->type);
+					$label->name = $ticket->type;
 				} else {
-					$type = sha1($config->import);
+					$label->name = $config->import;
 				}
 
-				if (isset($labels['types'][$type])) {
-					$labels[] = $labels['types'][$type];
+				if (isset($this->config->types->{$label->name})) {
+					$label->color = $this->getColor(
+						$this->config->types->{$label->name}
+					);
 				}
+
+				$labels[] = $label;
 			}
 		}
 
-		if (isset($this->config->trac->priorities->{$ticket->priority})) {
-			$config = $this->config->trac->priorities->{$ticket->priority};
+		if (isset($this->config->priorities->{$ticket->priority})) {
+			$config = $this->config->priorities->{$ticket->priority};
 			if (isset($config->import)) {
+				$label = new \stdClass();
+
 				if ($config->import === true) {
-					$priority = sha1($ticket->priority);
+					$label->name = $ticket->priority;
 				} else {
-					$priority = sha1($config->import);
+					$label->name = $config->import;
 				}
 
-				if (isset($labels['priorities'][$priority])) {
-					$labels[] = $labels['priorities'][$priority];
+				if (isset($this->config->priorities->{$label->name})) {
+					$label->color = $this->getColor(
+						$this->config->priorities->{$label->name}
+					);
 				}
+
+				$labels[] = $label;
 			}
 		}
 
-		if (isset($this->config->trac->resolutions->{$ticket->resolution})) {
-			$config = $this->config->trac->resolutions->{$ticket->resolution};
+		if (isset($this->config->resolutions->{$ticket->resolution})) {
+			$config = $this->config->resolutions->{$ticket->resolution};
 			if (isset($config->import)) {
+				$label = new \stdClass();
+
 				if ($config->import === true) {
-					$resolution = sha1($ticket->resolution);
+					$label->name = $ticket->resolution;
 				} else {
-					$resolution = sha1($config->import);
+					$label->name = $config->import;
 				}
 
-				if (isset($labels['resolutions'][$resolution])) {
-					$labels[] = $labels['resolutions'][$resolution];
+				if (isset($this->config->resolutions->{$label->name})) {
+					$label->color = $this->getColor(
+						$this->config->resolutions->{$label->name}
+					);
 				}
+
+				$labels[] = $label;
 			}
 		}
 
 		return $labels;
 	}
 
+	// }}}
 	// {{{ getIssueBody()
 
 	protected function getIssueBody(\stdClass $ticket)
