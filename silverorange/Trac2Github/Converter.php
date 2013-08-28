@@ -3,7 +3,6 @@
 namespace silverorange\Trac2Github;
 
 require_once 'Console/CommandLine.php';
-require_once 'silverorange/Trac2Github/Github.php';
 require_once 'silverorange/Trac2Github/MoinMoin2Markdown.php';
 
 /**
@@ -19,17 +18,7 @@ class Converter
 {
 	protected static $default_config = <<<JAVASCRIPT
 {
-	"cache": {
-		"milestones": "/tmp/trac_milestones.json",
-		"labels": "/tmp/trac_labels.json",
-		"tickets": "/tmp/trac_tickets.json"
-	},
-	"github": {
-		"username": "",
-		"password": "",
-		"project": "",
-		"repo": ""
-	},
+	"dir": "./",
 	"trac": {
 		"database": {
 			"dsn": ""
@@ -43,20 +32,25 @@ class Converter
 JAVASCRIPT;
 
 	protected $config = null;
-	protected $parser = null;
+	protected $cli = null;
 	protected $db = null;
-	protected $github = null;
 
 	public function __invoke()
 	{
-		$parser = \Console_CommandLine::fromXmlFile(
-			__DIR__ . '/../../data/cli.xml'
-		);
-		$this->cli = $parser->parse();
+		try {
+			$parser = \Console_CommandLine::fromXmlFile(
+				__DIR__ . '/../../data/cli.xml'
+			);
+			$this->cli = $parser->parse();
+		} catch (Console_CommandLineException $e) {
+			$parser->displayError($e->getMessage());
+			exit(1);
+		}
+
 		$this->config = $this->parseConfig($this->cli->options['config']);
 
 		try {
-			$db = new \PDO($this->config->trac->database->dsn);
+			$this->db = new \PDO($this->config->trac->database->dsn);
 		} catch (\PDOException $e) {
 			$this->terminate(
 				sprintf(
@@ -66,7 +60,7 @@ JAVASCRIPT;
 			);
 		}
 
-		$this->github = new GitHub($this->config, $this->cli);
+		$milestones = $this->convertMilestones();
 	}
 
 	protected function terminate($message)
@@ -118,61 +112,107 @@ JAVASCRIPT;
 		return $merge($default_config, $config);
 	}
 
+	// {{{ convertMilestones()
+
 	protected function convertMilestones()
 	{
-		$milestones = null;
-
-		if (is_readable($this->config->cache->milestones)) {
-			$milestones = json_decode(
-				file_get_contents($this->config->cache->milestones)
-			);
+		if ($this->cli->options['verbose']) {
+			echo 'Exporting milestones:' . PHP_EOL . PHP_EOL;
 		}
 
-		if ($milestones === null) {
-			$milestones = array();
-			$res = $this->db->query('select * from milestone order by due');
-			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
-				$resp = $this->github->addMilestone(
-					array(
-						'title'       => $row->name,
-						'state'       => ($row->completed == 0) ? 'open' : 'closed',
-						'description' => $this->getMilestoneDescription($row),
-						'due_on'      => date('Y-m-d\TH:i:s\Z', (int)$row->due),
-					)
-				);
+		$milestones = array();
 
-				if (isset($resp['number'])) {
-					$milestones[sha1($row->name)] = (int)$resp['number'];
-					echo 'Milestone ' . $row->name . ' converted to '
-						. $resp['number'] . PHP_EOL;
-				} else {
-					$error = print_r($resp, true);
-					echo 'Failed to convert milestone ' . $row->name . ': '
-						. $error . PHP_EOL;
-				}
-			}
+		$directory = $this->config->dir . DIRECTORY_SEPARATOR . 'milestones';
 
-			if ($this->config->cache->milestones != '') {
-				file_put_contents(
-					$this->config->cache->milestones,
-					json_encode($milestones)
-				);
-			}
+		if (!file_exists($directory)) {
+			mkdir($directory, 0770, true);
+		}
+
+		$statement = $this->db->prepare(
+			'select milestone.*, min(ticket.time) as createdate
+			from milestone
+				left outer join ticket on ticket.milestone = milestone.name
+			where ticket.component = :component
+			group by milestone.name, milestone.due, milestone.completed,
+				milestone.description
+			order by milestone.due'
+		);
+
+		$statement->bindParam(
+			':component',
+			$this->cli->args['component'],
+			\PDO::PARAM_STR
+		);
+
+		$statement->execute();
+
+		$id = 1;
+		foreach ($statement->fetchAll(\PDO::FETCH_OBJ) as $row) {
+			$milestone = new \stdClass();
+
+			$milestone->id   = $id;
+			$milestone->data = $this->convertMilestone($id, $row);
+
+			$milestones[$row->name] = $milestone;
+
+			$id++;
+		}
+
+		if ($this->cli->options['verbose']) {
+			echo PHP_EOL;
 		}
 
 		return $milestones;
 	}
+
+	// }}}
+	// {{{ convertMilestone()
+
+	protected function convertMilestone($id, \stdClass $row)
+	{
+		$milestone = new \stdClass();
+
+		$milestone->title       = $row->name;
+		$milestone->state       = ($row->completed == 0) ? 'open' : 'closed';
+		$milestone->description = $this->getMilestoneDescription($row);
+		$milestone->due_on      = date('Y-m-d\TH:i:s\Z', (int)$row->due);
+		$milestone->created_at  = date('Y-m-d\TH:i:s\Z', (int)$row->createdate);
+
+		if (version_compare('5.4.0', PHP_VERSION, 'le')) {
+			$content = json_encode($milestone, JSON_PRETTY_PRINT);
+		} else {
+			$content = json_encode($milestone);
+		}
+
+		$filename = $this->config->dir . DIRECTORY_SEPARATOR . 'milestones'
+			. DIRECTORY_SEPARATOR . $id . '.json';
+
+		file_put_contents($filename, $content);
+
+		if ($this->cli->options['verbose']) {
+			echo $content;
+			echo PHP_EOL;
+		}
+
+		return $milestone;
+	}
+
+	// }}}
+	// {{{ getMilestoneDescription()
 
 	protected function getMilestoneDescription($milestone)
 	{
 		$description = 'none';
 
 		if ($milestone->description != '') {
-			$description = MoinMoin2Markdown::convert($milestone->description);
+			$description = str_replace("\r\n", "\n", $milestone->description);
+			$description = MoinMoin2Markdown::convert($description);
 		}
 
 		return $description;
 	}
+
+	// }}}
 
 	protected function convertLabels()
 	{
@@ -204,7 +244,7 @@ JAVASCRIPT;
 				from ticket where resolution is not null and resolution != \'\''
 			);
 
-			foreach ($res->fetchAll(PDO::FETCH_OBJ) as $row) {
+			foreach ($res->fetchAll(\PDO::FETCH_OBJ) as $row) {
 				$config = null;
 
 				if (   isset($this->config->trac->{$row->label_type})
@@ -451,7 +491,7 @@ JAVASCRIPT;
 			$body .= MoinMoin2Markdown::convert($ticket->description);
 		}
 
-		return $body
+		return $body;
 	}
 
 	protected function getIssueAssignee(\stdClass $ticket)
@@ -513,21 +553,6 @@ JAVASCRIPT;
 					echo "Failed to add a comment: $error\n";
 				}
 			}
-		}
-	}
-
-	public function clearCache(\stdClass $config)
-	{
-		if (file_exists($config->cache->milestones)) {
-			unlink($config->cache->milestones);
-		}
-
-		if (file_exists($config->cache->labels)) {
-			unlink($config->cache->labels);
-		}
-
-		if (file_exists($config->cache->tickets)) {
-			unlink($config->cache->tickets);
 		}
 	}
 }

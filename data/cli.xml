@@ -5,7 +5,7 @@
 	<option name="verbose">
 		<short_name>-v</short_name>
 		<long_name>--verbose</long_name>
-		<description>Turns on verbose mode. Shows JSON output sent to Github.</description>
+		<description>Turns on verbose mode. Shows JSON output.</description>
 		<action>StoreTrue</action>
 	</option>
 	<option name="config">
@@ -15,48 +15,7 @@
 		<action>StoreString</action>
 		<default>config.json</default>
 	</option>
-	<option name="skip_labels">
-		<long_name>--skip-labels</long_name>
-		<description>Do not convert labels.</description>
-		<action>StoreTrue</action>
-	</option>
-	<option name="skip_tickets">
-		<long_name>--skip-tickets</long_name>
-		<description>Do not convert tickets.</description>
-		<action>StoreTrue</action>
-	</option>
-	<option name="skip_comments">
-		<long_name>--skip-comments</long_name>
-		<description>Do not convert comments.</description>
-		<action>StoreTrue</action>
-	</option>
-	<option name="skip_milestones">
-		<long_name>--skip-milestones</long_name>
-		<description>Do not convert milestones.</description>
-		<action>StoreTrue</action>
-	</option>
-	<option name="ticket_offset">
-		<long_name>--ticket-offset</long_name>
-		<description>Where to start converting tickets. By default, tickets are converted from the first ticket. Ignored if --skip-tickets is used.</description>
-		<action>StoreInt</action>
-		<default>0</default>
-	</option>
-	<option name="ticket_limit">
-		<long_name>--ticket-limit</long_name>
-		<description>Maximum number of tickets to convert. By default, all tickets are converted. Ignored if --skip-tickets is used.</description>
-		<action>StoreInt</action>
-		<default>0</default>
-	</option>
-	<option name="comment_offset">
-		<long_name>--comment-offset</long_name>
-		<description>Where to start converting comments. By default, comments are converted from the first comment. Ignored if --skip-comments is used.</description>
-		<action>StoreInt</action>
-		<default>0</default>
-	</option>
-	<option name="comment_limit">
-		<long_name>--comment-limit</long_name>
-		<description>Maximum number of comments to convert. By default, all comments are converted. Ignored if --skip-comments is used.</description>
-		<action>StoreInt</action>
-		<default>0</default>
-	</option>
+	<argument name="component">
+		<description>Trac component to convert.</description>
+	</argument>
 </command>
