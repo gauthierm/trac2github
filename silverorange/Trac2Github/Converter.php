@@ -16,7 +16,9 @@ require_once 'silverorange/Trac2Github/MoinMoin2Markdown.php';
  */
 class Converter
 {
-	protected static $default_config = <<<JAVASCRIPT
+	// {{{ $defaultConfig
+
+	protected static $defaultConfig = <<<JAVASCRIPT
 {
 	"database": {
 		"dsn": ""
@@ -27,6 +29,8 @@ class Converter
 	"resolutions": {}
 }
 JAVASCRIPT;
+
+	// }}}
 
 	protected $config = null;
 	protected $cli = null;
@@ -67,6 +71,8 @@ JAVASCRIPT;
 		exit(1);
 	}
 
+	// {{{ parseConfig()
+
 	protected function parseConfig($filename)
 	{
 		if (!is_readable($filename)) {
@@ -78,7 +84,7 @@ JAVASCRIPT;
 			);
 		}
 
-		$default_config = json_decode(self::$default_config);
+		$defaultConfig = json_decode(self::$defaultConfig);
 		$config = json_decode(file_get_contents($filename));
 
 		if ($config === null) {
@@ -106,9 +112,10 @@ JAVASCRIPT;
 			return $merged;
 		};
 
-		return $merge($default_config, $config);
+		return $merge($defaultConfig, $config);
 	}
 
+	// }}}
 	// {{{ convertMilestones()
 
 	protected function convertMilestones()
