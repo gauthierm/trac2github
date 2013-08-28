@@ -1,58 +1,45 @@
 {
-	"cache": {
-		"milestones": "/tmp/trac_milestones.json",
-		"labels": "/tmp/trac_labels.json",
-		"tickets": "/tmp/trac_tickets.json"
+	"database": {
+		"dsn=": ""
 	}
-	"github": {
-		"username": "",
-		"password": "",
-		"project": "",
-		"repo": ""
+	"users": {
+		"tracname1": "githubname1",
+		"tracname2": "githubname1"
 	},
-	"trac": {
-		"database": {
-			"dsn=": ""
+	"priorities": {
+		"priorityname1": {
+			"import": true,
+			"color": "e7eeff"
+		},
+		"priorityname2": {
+			"import": "priorityname1"
+		},
+		"priorityname3": {
+			"import": false
 		}
-		"users": {
-			"tracname1": "githubname1",
-			"tracname2": "githubname1"
+	},
+	"types": {
+		"typename1": {
+			"import": true,
+			"color": "e7eeff"
 		},
-		"priorities": {
-			"priorityname1": {
-				"import": true,
-				"color": "e7eeff"
-			},
-			"priorityname2": {
-				"import": "priorityname1"
-			},
-			"priorityname3": {
-				"import": false
-			}
+		"typename2": {
+			"import": "typename1"
 		},
-		"types": {
-			"typename1": {
-				"import": true,
-				"color": "e7eeff"
-			},
-			"typename2": {
-				"import": "typename1"
-			},
-			"typename3": {
-				"import": false
-			}
+		"typename3": {
+			"import": false
+		}
+	},
+	"resolutions": {
+		"resolutionname1": {
+			"import": true,
+			"color": "e7eeff"
 		},
-		"resolutions": {
-			"resolutionname1": {
-				"import": true,
-				"color": "e7eeff"
-			},
-			"resolutionname2": {
-				"import": "resolutionname1"
-			},
-			"resolutionname3": {
-				"import": false
-			}
+		"resolutionname2": {
+			"import": "resolutionname1"
+		},
+		"resolutionname3": {
+			"import": false
 		}
 	}
 }

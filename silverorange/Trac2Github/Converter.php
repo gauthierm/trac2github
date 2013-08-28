@@ -18,16 +18,13 @@ class Converter
 {
 	protected static $default_config = <<<JAVASCRIPT
 {
-	"dir": "./",
-	"trac": {
-		"database": {
-			"dsn": ""
-		},
-		"users": {},
-		"priorities": {},
-		"types": {},
-		"resolutions": {}
-	}
+	"database": {
+		"dsn": ""
+	},
+	"users": {},
+	"priorities": {},
+	"types": {},
+	"resolutions": {}
 }
 JAVASCRIPT;
 
@@ -50,12 +47,12 @@ JAVASCRIPT;
 		$this->config = $this->parseConfig($this->cli->options['config']);
 
 		try {
-			$this->db = new \PDO($this->config->trac->database->dsn);
+			$this->db = new \PDO($this->config->database->dsn);
 		} catch (\PDOException $e) {
 			$this->terminate(
 				sprintf(
 					'Unable to connect to database "%s"' . PHP_EOL,
-					$this->config->trac->database->dsn
+					$this->config->database->dsn
 				)
 			);
 		}
@@ -122,7 +119,8 @@ JAVASCRIPT;
 
 		$milestones = array();
 
-		$directory = $this->config->dir . DIRECTORY_SEPARATOR . 'milestones';
+		$directory = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
+			. 'milestones';
 
 		if (!file_exists($directory)) {
 			mkdir($directory, 0770, true);
@@ -184,8 +182,8 @@ JAVASCRIPT;
 			$content = json_encode($milestone);
 		}
 
-		$filename = $this->config->dir . DIRECTORY_SEPARATOR . 'milestones'
-			. DIRECTORY_SEPARATOR . $id . '.json';
+		$filename = $this->cli->options['dir'] . DIRECTORY_SEPARATOR
+			. 'milestones' . DIRECTORY_SEPARATOR . $id . '.json';
 
 		file_put_contents($filename, $content);
 

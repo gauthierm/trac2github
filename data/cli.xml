@@ -11,9 +11,16 @@
 	<option name="config">
 		<short_name>-c</short_name>
 		<long_name>--config</long_name>
-		<description>Specify configuration file name. If not specified, config.json in the current directory is used.</description>
+		<description>Specify configuration file name. If not specified, "config.json" in the current directory is used.</description>
 		<action>StoreString</action>
 		<default>config.json</default>
+	</option>
+	<option name="dir">
+		<short_name>-d</short_name>
+		<long_name>--dir</long_name>
+		<description>The directory in which to output the converted issues. If not specified, "issues" in the current directory is used.</description>
+		<action>StoreString</action>
+		<default>issues</default>
 	</option>
 	<argument name="component">
 		<description>Trac component to convert.</description>
