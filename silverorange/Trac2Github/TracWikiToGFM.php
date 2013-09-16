@@ -156,7 +156,7 @@ class TracWikiToGFM
 					$link = '[' . $title . '](' . $parts[0] . ')';
 				} else {
 					if (preg_match('/^[0-9]+$/', $parts[0]) === 1) {
-						$link = 'Trac Ticket #' . $parts[0];
+						$link = 'SVN commit r' . $parts[0];
 					} else {
 						$link = $parts[0];
 					}
