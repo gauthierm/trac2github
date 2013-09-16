@@ -3,7 +3,7 @@
 namespace silverorange\Trac2Github;
 
 require_once 'Console/CommandLine.php';
-require_once 'silverorange/Trac2Github/MoinMoin2Markdown.php';
+require_once 'silverorange/Trac2Github/TracWikiToGFM.php';
 
 /**
  * @package   trac2github
@@ -235,7 +235,7 @@ JAVASCRIPT;
 
 		if ($milestone->description != '') {
 			$description = str_replace("\r\n", "\n", $milestone->description);
-			$description = MoinMoin2Markdown::convert($description);
+			$description = TracWikiToGFM::convert($description);
 		}
 
 		return $description;
@@ -488,7 +488,7 @@ JAVASCRIPT;
 		// convert body to markdown
 		if (!empty($row->description)) {
 			$body .= "\n\n";
-			$body .= MoinMoin2Markdown::convert($ticket->description);
+			$body .= TracWikiToGFM::convert($ticket->description);
 		}
 
 		return $body;
@@ -592,7 +592,7 @@ JAVASCRIPT;
 	{
 		$body = $row->newvalue;
 		$body = str_replace("\r\n", "\n", $body);
-		return MoinMoin2Markdown::convert($body);
+		return TracWikiToGFM::convert($body);
 	}
 
 	// }}}

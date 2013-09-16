@@ -2,7 +2,7 @@
 
 namespace silverorange\Trac2Github;
 
-class MoinMoin2Markdown
+class TracWikiToGFM
 {
 	public static $baseUri = 'https://www.github.com/';
 
