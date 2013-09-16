@@ -221,16 +221,16 @@ class TracWikiToGFM
 	public static function convertWikiLinks($data)
 	{
 		$data = preg_replace_callback(
-			'/(?<!!)((?:[A-Z][a-z]+){2,})/',
+			'/(?:^|(\s+))((?:[A-Z][a-z]+){2,})/',
 			function ($matches) {
-				return '['. trim(
+				return $matches[1] . '['. trim(
 					preg_replace(
-						'/[A-Z][a-z]+/',
+						'/([A-Z][a-z]+)/',
 						' \1',
-						$matches[1]
+						$matches[2]
 					)
 				) . '](' . TracWikiToGFM::$baseUri .
-					'/wiki/' . $matches[1] . ')';
+					'/wiki/' . $matches[2] . ')';
 			},
 			$data
 		);
