@@ -229,7 +229,7 @@ class TracWikiToGFM
 						' \1',
 						$matches[1]
 					)
-				) . '](' . MoinMoin2Markdown::$baseUri .
+				) . '](' . TracWikiToGFM::$baseUri .
 					'/wiki/' . $matches[1] . ')';
 			},
 			$data
