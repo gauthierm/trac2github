@@ -4,13 +4,17 @@ namespace silverorange\Trac2Github;
 
 class MoinMoin2Markdown
 {
+	public static $baseUri = 'https://www.github.com/';
+
 	public static function convert($data)
 	{
 		$data = str_replace("\r\n", "\n", $data);
 		$data = str_replace("\r",   "\n", $data);
 
-		$data = self::convertEscape($data);
-		$data = self::convertCode($data);
+		$codeBlocks = self::getCodeBlocks($data);
+
+		$data = self::removeCodeBlocks($data);
+
 		$data = self::convertHeaders($data);
 		$data = self::convertBreaks($data);
 		$data = self::convertRules($data);
@@ -18,17 +22,59 @@ class MoinMoin2Markdown
 		$data = self::convertLinks($data);
 		$data = self::convertEmAndStrong($data);
 		$data = self::convertTables($data);
+		$data = self::convertWikiLinks($data);
+		$data = self::convertEscape($data);
+
+		$data = self::replaceCodeBlocks($data, $codeBlocks);
 
 		return $data;
 	}
 
-	public static function convertCode($data)
+	public static function getCodeBlocks($data)
 	{
-		// Replace code blocks with an associated language
-		$data = preg_replace('/\{\{\{(\s*#!(\w+))?/m', '```$2', $data);
-		$data = preg_replace('/\}\}\}/', '```', $data);
+		$blocks = array();
 
-		return $data;
+		$matches = array();
+		preg_match_all(
+			'/\{\{\{(?:\s*#!(\w+)\n)?(.*)\}\}\}/ms',
+			$data,
+			$matches,
+			PREG_SET_ORDER
+		);
+
+		foreach ($matches as $set) {
+			$blocks[] = array(
+				'language' => $set[1],
+				'code'     => ltrim($set[2], "\n"),
+			);
+		}
+
+		return $blocks;
+	}
+
+	public static function removeCodeBlocks($data)
+	{
+		return preg_replace(
+			'/\{\{\{(\s*#!\w+\n)?(.*)\}\}\}/ms',
+			'%s',
+			str_replace('%', '%%', $data)
+		);
+	}
+
+	public static function replaceCodeBlocks($data, array $blocks)
+	{
+		$replacements = array();
+
+		foreach ($blocks as $block) {
+			if ($block['language'] == '') {
+				$replacements[] = "```\n" . $block['code'] . "\n```";
+			} else {
+				$replacements[] = "```\n" . $block['language'] . "\n" .
+					$block['code'] . "\n```";
+			}
+		}
+
+		return vsprintf($data, $replacements);
 	}
 
 	public static function convertHeaders($data)
@@ -81,16 +127,8 @@ class MoinMoin2Markdown
 
 	public static function convertRules($data)
 	{
-		// replace hr on line by itself
-		$data = preg_replace('/^\s*\[\[\s*hr\\s*]\]\s*$/mi', '* * *', $data);
-
-		// replace hr on end of line
-		$data = preg_replace('/\s*\[\[\s*hr\\s*]\]\s*$/mi', "\n* * *", $data);
-
-		// replace inline hr
-		$data = preg_replace('/\s*\[\[\s*hr\\s*]\]\s*/mi', "\n* * *\n", $data);
-
-		return $data;
+		// Replace hr on line by itself. Any trailing chars are ignored.
+		return preg_replace('/^\s*-{4,}.*$/mi', '* * *', $data);
 	}
 
 	public static function convertEscape($data)
@@ -117,7 +155,11 @@ class MoinMoin2Markdown
 					$title = preg_replace('/^wiki:/', '', $parts[0]);
 					$link = '[' . $title . '](' . $parts[0] . ')';
 				} else {
-					$link = '<' . $parts[0] . '>';
+					if (preg_match('/^[0-9]+$/', $parts[0]) === 1) {
+						$link = 'Trac Ticket #' . $parts[0];
+					} else {
+						$link = $parts[0];
+					}
 				}
 			}
 
@@ -174,5 +216,24 @@ class MoinMoin2Markdown
 			$replace,
 			$data
 		);
+	}
+
+	public static function convertWikiLinks($data)
+	{
+		$data = preg_replace_callback(
+			'/(?<!!)((?:[A-Z][a-z]+){2,})/',
+			function ($matches) {
+				return '['. trim(
+					preg_replace(
+						'/[A-Z][a-z]+/',
+						' \1',
+						$matches[1]
+					)
+				) . '](' . MoinMoin2Markdown::$baseUri .
+					'/wiki/' . $matches[1] . ')';
+			},
+			$data
+		);
+		return $data;
 	}
 }
