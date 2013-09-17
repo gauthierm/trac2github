@@ -26,7 +26,10 @@ class Converter
 	"users": {},
 	"priorities": {},
 	"types": {},
-	"resolutions": {}
+	"resolutions": {},
+	"attachments": {
+		"base_uri": ""
+	}
 }
 JAVASCRIPT;
 
@@ -534,25 +537,18 @@ JAVASCRIPT;
 				. PHP_EOL . PHP_EOL;
 		}
 
-		$comments = array();
+		$comments = array_merge(
+			$this->convertIssueCommentComments($ticket),
+			$this->convertIssueCommentAttachments($ticket)
+		);
 
-		static $statement = null;
-
-		if ($statement === null) {
-			$statement = $this->db->prepare(
-				'select * from ticket_change
-				where field = \'comment\' and newvalue != \'\'
-					and ticket = :ticket
-				order by time'
-			);
-		}
-
-		$statement->bindParam(':ticket', $ticket->id, \PDO::PARAM_STR);
-		$statement->execute();
-
-		foreach ($statement->fetchAll(\PDO::FETCH_OBJ) as $row) {
-			$comments[] = $this->convertIssueComment($row);
-		}
+		// mix comments and attachments, sort by date
+		usort(
+			$comments,
+			function($a, $b) {
+				return strcmp($a->created_at, $b->created_at);
+			}
+		);
 
 		if (count($comments) > 0) {
 			$content = $this->encode($comments);
@@ -572,27 +568,172 @@ JAVASCRIPT;
 	}
 
 	// }}}
-	// {{{ convertIssueComment()
+	// {{{ convertIssueCommentComments()
 
-	protected function convertIssueComment(\stdClass $row)
+	protected function convertIssueCommentComments(\stdClass $ticket)
+	{
+		if ($this->cli->options['verbose']) {
+			echo '=> getting comments for ticket #' . $ticket->id . ':'
+				. PHP_EOL . PHP_EOL;
+		}
+
+		$comments = array();
+
+		static $statement = null;
+
+		if ($statement === null) {
+			$statement = $this->db->prepare(
+				'select * from ticket_change
+				where field = \'comment\' and newvalue != \'\'
+					and ticket = :ticket
+				order by time'
+			);
+		}
+
+		$statement->bindParam(':ticket', $ticket->id, \PDO::PARAM_STR);
+		$statement->execute();
+
+		foreach ($statement->fetchAll(\PDO::FETCH_OBJ) as $row) {
+			$comments[] = $this->convertIssueCommentComment($row);
+		}
+
+		return $comments;
+	}
+
+	// }}}
+	// {{{ convertIssueCommentComment()
+
+	protected function convertIssueCommentComment(\stdClass $row)
 	{
 		$comment = new \stdClass();
 
 		$comment->user       = $this->getUser($row->author);
 		$comment->created_at = $this->getDate($row->time);
-		$comment->body       = $this->getIssueCommentBody($row);
+		$comment->body       = $this->getIssueCommentCommentBody($row);
 
 		return $comment;
 	}
 
 	// }}}
-	// {{{ getIssueCommentBody()
+	// {{{ convertIssueCommentAttachments()
 
-	protected function getIssueCommentBody(\stdClass $row)
+	protected function convertIssueCommentAttachments(\stdClass $ticket)
+	{
+		if ($this->cli->options['verbose']) {
+			echo '=> getting attachments for ticket #' . $ticket->id . ':'
+				. PHP_EOL . PHP_EOL;
+		}
+
+		$comments = array();
+
+		static $statement = null;
+
+		if ($statement === null) {
+			$statement = $this->db->prepare(
+				'select * from attachment
+				where type = \'ticket\' and id = :ticket
+				order by time'
+			);
+		}
+
+		$statement->bindParam(':ticket', $ticket->id, \PDO::PARAM_STR);
+		$statement->execute();
+
+		foreach ($statement->fetchAll(\PDO::FETCH_OBJ) as $row) {
+			$comments[] = $this->convertIssueCommentAttachment($row);
+		}
+
+		return $comments;
+	}
+
+	// }}}
+	// {{{ convertIssueCommentAttachment()
+
+	protected function convertIssueCommentAttachment(\stdClass $row)
+	{
+		$comment = new \stdClass();
+
+		$comment->user       = $this->getUser($row->author);
+		$comment->created_at = $this->getDate($row->time);
+		$comment->body       = $this->getIssueCommentAttachmentBody($row);
+
+		return $comment;
+	}
+
+	// }}}
+	// {{{ getIssueCommentCommentBody()
+
+	protected function getIssueCommentCommentBody(\stdClass $row)
 	{
 		$body = $row->newvalue;
 		$body = str_replace("\r\n", "\n", $body);
 		return TracWikiToGFM::convert($body);
+	}
+
+	// }}}
+	// {{{ getIssueCommentAttachmentBody()
+
+	protected function getIssueCommentAttachmentBody(\stdClass $row)
+	{
+		return sprintf(
+			'Attachment [%s](%s) added (%s)',
+			$row->filename,
+			$this->getIssueCommentAttachmentURI($row->id, $row->filename),
+			$this->getIssueCommentAttachmentFilesize($row->size)
+		);
+	}
+
+	// }}}
+	// {{{ getIssueCommentAttachmentURI()
+
+	protected function getIssueCommentAttachmentURI($ticket_id, $filename)
+	{
+		$base_uri = rtrim($this->config->attachments->base_uri, '/');
+		return $base_uri . '/' . $ticket_id . '/' . $filename;
+	}
+
+	// }}}
+	// {{{ getIssueCommentAttachmentFilesize()
+
+	protected function getIssueCommentAttachmentFilesize($value)
+	{
+		static $units = array(
+			60 => 'EB',
+			50 => 'PB',
+			40 => 'TB',
+			30 => 'GB',
+			20 => 'MB',
+			10 => 'KB',
+			0  => 'bytes',
+		);
+
+		$unitMagnitude = null;
+
+		if ($value == 0) {
+			$unitMagnitude = 0;
+		} else {
+			$log = floor(log10($value) / log10(2)); // get log2()
+
+			$unitMagnitude = reset($units); // default magnitude
+			foreach ($units as $magnitude => $title) {
+				if ($log >= $magnitude) {
+					$unitMagnitude = $magnitude;
+					break;
+				}
+			}
+		}
+
+		$value = $value / pow(2, $unitMagnitude);
+
+		if ($unitMagnitude == 0) {
+			// 'bytes' are always formatted as integers
+			$formatted_value = number_format($value, 0);
+		} else {
+			// just round to one fractional digit
+			$formatted_value = number_format($value, 1);
+		}
+
+		return $formatted_value . ' ' . $units[$unitMagnitude];
 	}
 
 	// }}}

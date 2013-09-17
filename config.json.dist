@@ -2,6 +2,9 @@
 	"database": {
 		"dsn=": ""
 	}
+	"attachments": {
+		"base_uri": "https://my-server.com/"
+	},
 	"users": {
 		"tracname1": "githubname1",
 		"tracname2": "githubname1"
