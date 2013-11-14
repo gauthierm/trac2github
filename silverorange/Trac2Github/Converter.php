@@ -675,12 +675,22 @@ JAVASCRIPT;
 
 	protected function getIssueCommentAttachmentBody(\stdClass $row)
 	{
-		return sprintf(
+		$body = sprintf(
 			'Attachment [%s](%s) added (%s)',
 			$row->filename,
 			$this->getIssueCommentAttachmentURI($row->id, $row->filename),
 			$this->getIssueCommentAttachmentFilesize($row->size)
 		);
+
+		if ($row->description != '') {
+			$description = $row->description;
+			$description = str_replace("\r\n", "\n", $description);
+
+			$body .= "\n\n";
+			$body .= TracWikiToGFM::convert($description);
+		}
+
+		return $body;
 	}
 
 	// }}}
