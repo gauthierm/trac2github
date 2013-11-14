@@ -489,7 +489,7 @@ JAVASCRIPT;
 		}
 
 		// convert body to markdown
-		if (!empty($row->description)) {
+		if (!empty($ticket->description)) {
 			$body .= "\n\n";
 			$body .= TracWikiToGFM::convert($ticket->description);
 		}
