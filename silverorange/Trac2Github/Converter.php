@@ -211,8 +211,12 @@ JAVASCRIPT;
 		$milestone->title       = $row->name;
 		$milestone->state       = ($row->completed == 0) ? 'open' : 'closed';
 		$milestone->description = $this->getMilestoneDescription($row);
-		$milestone->due_on      = $this->getDate($row->due);
 		$milestone->created_at  = $this->getDate($row->createdate);
+
+		// Due date is optional. Milestones with a 0 timestamp have no due date
+		if ((int)$row->due > 0) {
+			$milestone->due_on = $this->getDate($row->due);
+		}
 
 		$content = $this->encode($milestone);
 
